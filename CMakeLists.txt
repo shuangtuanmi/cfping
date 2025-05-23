@@ -42,6 +42,7 @@ if(DEFINED ENV{VCPKG_ROOT} OR EXISTS "${CMAKE_SOURCE_DIR}/vcpkg")
 else()
     # System installation
     find_package(Boost REQUIRED COMPONENTS system)
+    find_package(Boost REQUIRED COMPONENTS asio)
     set(BOOST_LIBRARIES ${Boost_LIBRARIES})
     include_directories(${Boost_INCLUDE_DIRS})
 endif()
@@ -86,6 +87,7 @@ target_link_libraries(CFPing
     Qt5::Gui
     Qt5::Network
 )
+
 
 # Link Boost properly
 if(TARGET Boost::system)
