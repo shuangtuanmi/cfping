@@ -46,13 +46,14 @@ jobs:
         
     - name: Install dependencies (Windows)
       if: matrix.os == 'windows-latest'
-      run: |
-        choco install ninja
-        # Install vcpkg and full boost library
-        git clone https://github.com/Microsoft/vcpkg.git
-        .\vcpkg\bootstrap-vcpkg.bat
-        # Install the full boost package which includes asio
-        .\vcpkg\vcpkg.exe install boost:x64-windows
+      uses: johnwason/vcpkg-action@v6
+      id: vcpkg
+      with:
+        pkgs: boost-asio
+        triplet: x64-windows-release
+        token: ${{ github.token }}
+        github-binarycache: true
+
         
     - name: Debug Boost installation (Windows)
       if: matrix.os == 'windows-latest'
@@ -161,3 +162,130 @@ jobs:
         path: build/*.dmg
         retention-days: 30
       if: matrix.os == 'macos-latest'
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Generate release tag
+      id: tag
+      run: |
+        if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          echo "tag=v$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+          echo "prerelease=false" >> $GITHUB_OUTPUT
+          echo "name=Release $(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
+        else
+          echo "tag=dev-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+          echo "prerelease=true" >> $GITHUB_OUTPUT
+          echo "name=Development Build $(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+        
+    - name: Display artifact structure
+      run: find ./artifacts -type f -name "*" | head -20
+      
+    - name: Prepare release files
+      run: |
+        mkdir -p ./release-files
+        
+        # Copy Windows files if they exist
+        if [ -d "./artifacts/cfping-windows-latest" ]; then
+          find ./artifacts/cfping-windows-latest -name "*.exe" -exec cp {} ./release-files/ \;
+        fi
+        
+        # Copy Linux files if they exist
+        if [ -d "./artifacts/cfping-ubuntu-latest" ]; then
+          find ./artifacts/cfping-ubuntu-latest -name "*.deb" -exec cp {} ./release-files/ \;
+          find ./artifacts/cfping-ubuntu-latest -name "*.tar.gz" -exec cp {} ./release-files/ \;
+        fi
+        
+        # Copy macOS files if they exist
+        if [ -d "./artifacts/cfping-macos-latest" ]; then
+          find ./artifacts/cfping-macos-latest -name "*.dmg" -exec cp {} ./release-files/ \;
+        fi
+        
+        # List files to be released
+        echo "Files to be released:"
+        ls -la ./release-files/
+        
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.tag }}
+        release_name: ${{ steps.tag.outputs.name }}
+        body: |
+          ## CFPing Release
+          
+          **Branch:** ${{ github.ref_name }}
+          **Commit:** ${{ github.sha }}
+          **Build Date:** $(date +'%Y-%m-%d %H:%M:%S UTC')
+          
+          ### Downloads
+          - **Windows**: CFPing-1.0.0-win64.exe (Windows 安装包)
+          - **Linux**: CFPing-1.0.0-Linux.deb (Ubuntu/Debian 包)
+          - **Linux**: CFPing-1.0.0-Linux.tar.gz (通用 Linux 包)  
+          - **macOS**: CFPing-1.0.0-Darwin.dmg (macOS 磁盘镜像)
+          
+          ### Changes
+          - Latest changes from ${{ github.ref_name }} branch
+          
+          ---
+          *This release was automatically generated from commit ${{ github.sha }}*
+        draft: false
+        prerelease: ${{ steps.tag.outputs.prerelease }}
+        
+    - name: Upload Windows Release Asset
+      if: hashFiles('./release-files/*.exe') != ''
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./release-files/CFPing-1.0.0-win64.exe
+        asset_name: CFPing-1.0.0-win64.exe
+        asset_content_type: application/octet-stream
+        
+    - name: Upload Linux DEB Release Asset
+      if: hashFiles('./release-files/*.deb') != ''
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./release-files/CFPing-1.0.0-Linux.deb
+        asset_name: CFPing-1.0.0-Linux.deb
+        asset_content_type: application/vnd.debian.binary-package
+        
+    - name: Upload Linux TAR Release Asset
+      if: hashFiles('./release-files/*.tar.gz') != ''
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./release-files/CFPing-1.0.0-Linux.tar.gz
+        asset_name: CFPing-1.0.0-Linux.tar.gz
+        asset_content_type: application/gzip
+        
+    - name: Upload macOS Release Asset
+      if: hashFiles('./release-files/*.dmg') != ''
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./release-files/CFPing-1.0.0-Darwin.dmg
+        asset_name: CFPing-1.0.0-Darwin.dmg
+        asset_content_type: application/x-apple-diskimage
