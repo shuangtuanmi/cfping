@@ -1,0 +1,76 @@
+# Build directories
+build*/
+debug/
+release/
+Debug/
+Release/
+x64/
+x86/
+*.build/
+
+# Qt specific
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.qbs.user.*
+*.moc
+*.o
+*.obj
+*.so
+*.dll
+*.dylib
+*.exe
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+Makefile*
+*build-*
+
+# IDE files
+.vscode/
+.vs/
+*.vcxproj.user
+*.vcxproj.filters
+*.sln.docstates
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.cmake
+!CMakeLists.txt
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.cache
+*~
+*.swp
+*.swo
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Boost libraries (if statically linked)
+boost_*/
+
+# Output files
+*.txt
+!*.gitkeep
+
+# Backup files
+*.bak
+*.backup
+*.orig
