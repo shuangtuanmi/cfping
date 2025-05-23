@@ -6,15 +6,24 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find required packages
 find_package(Qt5 REQUIRED COMPONENTS Core Widgets Gui Network)
-find_package(Boost REQUIRED COMPONENTS system)
+
+# Handle Boost differently for vcpkg and system installation
+if(DEFINED ENV{VCPKG_ROOT} OR EXISTS "${CMAKE_SOURCE_DIR}/vcpkg")
+    # Using vcpkg
+    find_package(Boost REQUIRED COMPONENTS system)
+    # For vcpkg, use target-based linking
+    set(BOOST_LIBRARIES Boost::system)
+else()
+    # System installation
+    find_package(Boost REQUIRED COMPONENTS system)
+    set(BOOST_LIBRARIES ${Boost_LIBRARIES})
+    include_directories(${Boost_INCLUDE_DIRS})
+endif()
 
 # Enable Qt5 MOC
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
-
-# Include directories
-include_directories(${Boost_INCLUDE_DIRS})
 
 # Add compiler flags for coroutines
 if(MINGW)
@@ -50,7 +59,7 @@ target_link_libraries(CFPing
     Qt5::Widgets 
     Qt5::Gui
     Qt5::Network
-    ${Boost_LIBRARIES}
+    ${BOOST_LIBRARIES}
 )
 
 # Windows specific settings
