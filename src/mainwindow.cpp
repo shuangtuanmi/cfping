@@ -44,27 +44,27 @@ void MainWindow::setupUI()
     m_centralWidget = new QWidget(this);
     setCentralWidget(m_centralWidget);
     
-    // Main splitter (left panel | right panel)
+    // 主分割器（左侧面板 | 右侧面板）
     m_mainSplitter = new QSplitter(Qt::Horizontal, this);
     
-    // Left panel - CIDR input and controls
+    // 左侧面板 - CIDR输入和控制
     QWidget* leftPanel = new QWidget();
     QVBoxLayout* leftLayout = new QVBoxLayout(leftPanel);
     
-    // CIDR input
+    // CIDR输入
     leftLayout->addWidget(new QLabel("CIDR地址段:"));
     m_cidrTextEdit = new QTextEdit();
-    m_cidrTextEdit->setPlainText("# 输入CIDR地址段 (每行一个)\n# IPv4示例:\n104.16.0.0/13\n104.24.0.0/14\n108.162.192.0/18\n# IPv6示例:\n2606:4700::/32\n2a06:98c0::/29");
+    m_cidrTextEdit->setPlainText("# 输入CIDR地址段 (每行一个)\n# IPv4示例:\n104.16.0.0/13\n104.24.0.0/14\n108.162.192.0/18");
     leftLayout->addWidget(m_cidrTextEdit);
     
-    // File operations
+    // 文件操作
     QHBoxLayout* fileLayout = new QHBoxLayout();
     m_openFileButton = new QPushButton("打开文件");
     fileLayout->addWidget(m_openFileButton);
     fileLayout->addStretch();
     leftLayout->addLayout(fileLayout);
     
-    // Settings
+    // 设置区域
     QGridLayout* settingsLayout = new QGridLayout();
     settingsLayout->addWidget(new QLabel("线程数量:"), 0, 0);
     m_threadCountSpinBox = new QSpinBox();
@@ -74,15 +74,15 @@ void MainWindow::setupUI()
     
     settingsLayout->addWidget(new QLabel("超时时间 (毫秒):"), 1, 0);
     m_timeoutSpinBox = new QSpinBox();
-    m_timeoutSpinBox->setRange(100, 5000);
+    m_timeoutSpinBox->setRange(10, 5000);
     m_timeoutSpinBox->setValue(500);
     settingsLayout->addWidget(m_timeoutSpinBox, 1, 1);
     
     settingsLayout->addWidget(new QLabel("最大并发任务:"), 2, 0);
     m_concurrentTasksSpinBox = new QSpinBox();
-    m_concurrentTasksSpinBox->setRange(100, 10000);
-    m_concurrentTasksSpinBox->setValue(2000);
-    m_concurrentTasksSpinBox->setSingleStep(100);
+    m_concurrentTasksSpinBox->setRange(10, 10000);
+    m_concurrentTasksSpinBox->setValue(500);
+    m_concurrentTasksSpinBox->setSingleStep(10);
     settingsLayout->addWidget(m_concurrentTasksSpinBox, 2, 1);
     
     m_enableLoggingCheckBox = new QCheckBox("启用详细日志");
@@ -90,7 +90,7 @@ void MainWindow::setupUI()
     
     leftLayout->addLayout(settingsLayout);
     
-    // Control buttons
+    // 控制按钮
     QHBoxLayout* controlLayout = new QHBoxLayout();
     m_startButton = new QPushButton("开始测试");
     m_stopButton = new QPushButton("停止");
@@ -102,7 +102,7 @@ void MainWindow::setupUI()
     
     leftLayout->addLayout(controlLayout);
     
-    // Status
+    // 状态显示
     m_progressBar = new QProgressBar();
     m_statusLabel = new QLabel("就绪");
     m_testCountLabel = new QLabel("IP地址: 0 / 0");
@@ -115,10 +115,10 @@ void MainWindow::setupUI()
     leftPanel->setMaximumWidth(350);
     m_mainSplitter->addWidget(leftPanel);
     
-    // Right panel - Results and logs
+    // 右侧面板 - 结果和日志
     m_rightSplitter = new QSplitter(Qt::Vertical);
     
-    // Results table with model
+    // 结果表格及模型
     QWidget* resultsWidget = new QWidget();
     QVBoxLayout* resultsLayout = new QVBoxLayout(resultsWidget);
     
@@ -135,7 +135,7 @@ void MainWindow::setupUI()
     m_resultsTable->setModel(m_resultsModel);
     m_resultsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_resultsTable->setAlternatingRowColors(true);
-    m_resultsTable->setSortingEnabled(false); // 禁用列排序，我们自己处理
+    m_resultsTable->setSortingEnabled(false); // 禁用列排序，由我们自己处理
     m_resultsTable->setShowGrid(false);
     
     // 设置列宽
@@ -145,7 +145,7 @@ void MainWindow::setupUI()
     
     resultsLayout->addWidget(m_resultsTable);
     
-    // Logs - 改为使用 TableView 和模型
+    // 日志 - 改为使用 TableView 和模型
     QWidget* logsWidget = new QWidget();
     QVBoxLayout* logsLayout = new QVBoxLayout(logsWidget);
     logsLayout->addWidget(new QLabel("日志 (最近100条):"));
@@ -177,7 +177,7 @@ void MainWindow::setupUI()
     m_mainSplitter->addWidget(m_rightSplitter);
     m_mainSplitter->setSizes({350, 650});
     
-    // Main layout
+    // 主布局
     QVBoxLayout* mainLayout = new QVBoxLayout(m_centralWidget);
     mainLayout->addWidget(m_mainSplitter);
     
@@ -235,13 +235,13 @@ void MainWindow::startPing()
     m_completedIPs = 0;
     m_totalIPs = 0;
     
-    // Clear results model
+    // 清空结果模型
     m_resultsModel->clear();
 
-    // Clear logs - 使用新的模型方法
+    // 清空日志
     m_logModel->clear();
     
-    // Create worker
+    // 创建工作线程
     try {
         m_pingWorker = std::make_unique<PingWorker>();
         m_workerThread = new QThread(this);
@@ -254,7 +254,7 @@ void MainWindow::startPing()
         bool enableLogging = m_enableLoggingCheckBox->isChecked();
         QStringList ranges = cidrRanges;
         
-        // Connect signals
+        // 连接信号
         connect(m_workerThread, &QThread::started, [this, threadCount, timeout, enableLogging, maxConcurrentTasks, ranges]() {
             if (m_pingWorker) {
                 m_pingWorker->setSettings(threadCount, timeout, enableLogging, maxConcurrentTasks);
@@ -369,9 +369,28 @@ void MainWindow::onPingProgress(int current, int total)
     m_completedIPs = current;
     m_totalIPs = total;
     
+    // 确保进度值不超过100%
+    if (m_completedIPs > m_totalIPs) {
+        m_completedIPs = m_totalIPs;
+    }
+    
+    // 更新UI显示
+    updateResultsDisplay();
+    
     // 每1000个IP更新一次UI，减少更新频率
     if (current % 1000 == 0) {
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 10);
+    }
+    
+    // 如果已完成所有IP，检查是否需要停止任务
+    if (m_isRunning && m_completedIPs >= m_totalIPs) {
+        // 添加计时器检查，避免过早停止
+        QTimer::singleShot(2000, this, [this]() {
+            if (m_isRunning && m_completedIPs >= m_totalIPs) {
+                // 如果仍在运行且已全部完成，则停止任务
+                stopPing();
+            }
+        });
     }
 }
 
@@ -413,11 +432,16 @@ void MainWindow::updateResultsDisplay()
 {
     // 更新进度信息
     if (m_totalIPs > 0) {
-        m_progressBar->setValue((m_completedIPs * 100) / m_totalIPs);
+        // 确保百分比不超过100%
+        int percentage = std::min(100, (m_completedIPs * 100) / m_totalIPs);
+        m_progressBar->setValue(percentage);
         m_testCountLabel->setText(QString("IP地址: %1 / %2").arg(m_completedIPs).arg(m_totalIPs));
+        
+        // 在进度条100%时更新状态文本
+        if (percentage >= 100) {
+            m_statusLabel->setText("测试完成");
+        }
     }
-    
-    // 模型会自动处理结果显示，无需手动更新表格
 }
 
 void MainWindow::copySelectedIPs()
@@ -426,7 +450,7 @@ void MainWindow::copySelectedIPs()
     QStringList selectedIPs = m_resultsModel->getSelectedIPs(selectedIndexes);
     
     if (selectedIPs.isEmpty()) {
-        // If nothing selected, copy all visible IPs
+        // 如果没有选中，则复制所有可见IP
         selectedIPs = m_resultsModel->getAllIPs();
     }
     
@@ -456,7 +480,6 @@ void MainWindow::enableControls(bool enabled)
 
 void MainWindow::addLogMessage(const QString& message)
 {
-    // 使用新的日志模型，性能更好
     if (m_logModel) {
         m_logModel->addLogMessage(message);
     }

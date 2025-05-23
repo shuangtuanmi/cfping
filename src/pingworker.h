@@ -19,60 +19,70 @@
 
 class CidrExpander;
 
+// PingWorker类，负责批量异步TCP连接测试
 class PingWorker : public QObject
 {
     Q_OBJECT
 
 public:
-    explicit PingWorker(QObject *parent = nullptr);
-    ~PingWorker();
+    explicit PingWorker(QObject *parent = nullptr); // 构造函数
+    ~PingWorker(); // 析构函数
 
+    // 设置线程数、超时时间、日志开关、最大并发任务数
     void setSettings(int threadCount, int timeoutMs, bool enableLogging, int maxConcurrentTasks);
 
 public slots:
-    void startPing(const QStringList& cidrRanges);
-    void stopPing();
+    void startPing(const QStringList& cidrRanges); // 启动ping任务
+    void stopPing(); // 停止ping任务
 
 signals:
-    void pingResult(const QString& ip, double latency, bool success);
-    void progress(int current, int total);
-    void logMessage(const QString& message);
-    void finished();
+    void pingResult(const QString& ip, double latency, bool success); // 单个IP测试结果
+    void progress(int current, int total); // 进度信号
+    void logMessage(const QString& message); // 日志信号
+    void finished(); // 任务完成信号
 
 private:
+    // 协程：对单个IP进行TCP连接测试
     boost::asio::awaitable<void> pingIPWithAddress(boost::asio::ip::address address, QString originalIP);
-    boost::asio::awaitable<void> processPingQueue();
+
+    // 处理下一批IP
     void processNextBatch();
+    // 清理资源
     void cleanup();
+    // 安全清理，防止重复
     void safeCleanup();
     
-    std::unique_ptr<boost::asio::io_context> m_ioContext;
-    std::unique_ptr<boost::asio::executor_work_guard<boost::asio::io_context::executor_type>> m_workGuard;
-    std::unique_ptr<boost::asio::cancellation_signal> m_cancellationSignal;
-    std::vector<std::thread> m_threads;
-    std::unique_ptr<CidrExpander> m_cidrExpander;
+    // Boost Asio相关成员
+    std::unique_ptr<boost::asio::io_context> m_ioContext; // IO上下文
+    std::unique_ptr<boost::asio::executor_work_guard<boost::asio::io_context::executor_type>> m_workGuard; // 保持io_context存活
+    std::unique_ptr<boost::asio::cancellation_signal> m_cancellationSignal; // 协程取消信号
+    std::vector<std::thread> m_threads; // 线程池
+    std::unique_ptr<CidrExpander> m_cidrExpander; // CIDR扩展器
     
+    // IP队列与互斥锁
     std::queue<QString> m_ipQueue;
     std::mutex m_queueMutex;
     
-    QTimer* m_batchTimer;
-    QTimer* m_stopCheckTimer;
-    QTimer* m_cleanupTimer;
+    // 定时器
+    QTimer* m_batchTimer; // 批量处理定时器
+    QTimer* m_stopCheckTimer; // 停止检查定时器
+    QTimer* m_cleanupTimer; // 清理定时器
     
-    std::atomic<bool> m_running;
-    std::atomic<bool> m_stopRequested;
-    std::atomic<bool> m_cleanupInProgress;
-    std::atomic<int> m_completedCount;
-    std::atomic<int> m_totalCount;
-    std::atomic<int> m_activePings;
+    // 状态变量
+    std::atomic<bool> m_running; // 是否正在运行
+    std::atomic<bool> m_stopRequested; // 是否请求停止
+    std::atomic<bool> m_cleanupInProgress; // 是否正在清理
+    std::atomic<int> m_completedCount; // 已完成数量
+    std::atomic<int> m_totalCount; // 总数量
+    std::atomic<int> m_activePings; // 活跃任务数
     
-    int m_threadCount;
-    int m_timeoutMs;
-    int m_maxConcurrentTasks;
-    bool m_enableLogging;
+    int m_threadCount; // 线程数
+    int m_timeoutMs; // 超时时间
+    int m_maxConcurrentTasks; // 最大并发任务数
+    bool m_enableLogging; // 是否启用日志
     
-    static constexpr int BATCH_SIZE = 500;
-    static constexpr int DEFAULT_MAX_CONCURRENT_PINGS = 1000;
+    static constexpr int BATCH_SIZE = 500; // 每批处理数量
+    static constexpr int DEFAULT_MAX_CONCURRENT_PINGS = 1000; // 默认最大并发数
 };
 
 #endif // PINGWORKER_H

@@ -26,15 +26,21 @@ void CidrExpander::setCidrRanges(const QStringList& cidrRanges)
             continue; // 跳过无效的CIDR
         }
         
-        auto range = IPUtils::cidrToRange(cidr);
-        m_ranges.emplace(range.first, range.second, cidr);
-        
-        // 计算IP数量，对于IPv6大范围需要特殊处理
+        // 先计算IP数量
         uint64_t count = IPUtils::getCIDRIPCount(cidr);
         if (count == UINT64_MAX) {
             // IPv6范围太大，设置为合理的上限
             count = 1000000; // 可根据需要调整
+        } else if (count == 0) {
+            // 无效的CIDR，跳过
+            continue;
         }
+        
+        // 获取起始和结束IP
+        auto range = IPUtils::cidrToRange(cidr);
+        m_ranges.emplace(range.first, range.second, cidr);
+        
+        // 累加IP数量
         m_totalIPs += count;
     }
 }
@@ -58,11 +64,21 @@ QStringList CidrExpander::getNextBatch(int batchSize)
             batch.append(IPUtils::ipToString(range.current));
             range.current = IPUtils::incrementIP(range.current);
             m_processedIPs++;
+            
+            // 确保处理IP数不超过总IP数
+            if (m_processedIPs.load() >= m_totalIPs.load()) {
+                break;
+            }
         }
         
         // 如果当前范围已处理完，移除它
-        if (!IPUtils::compareIP(range.current, range.end)) {
+        if (!IPUtils::compareIP(range.current, range.end) || m_processedIPs.load() >= m_totalIPs.load()) {
             m_ranges.pop();
+        }
+        
+        // 如果已经处理了足够的IP，提前结束
+        if (m_processedIPs.load() >= m_totalIPs.load()) {
+            break;
         }
     }
     

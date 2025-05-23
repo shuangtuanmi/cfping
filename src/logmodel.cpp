@@ -9,8 +9,7 @@ LogModel::LogModel(QObject *parent)
     m_updateTimer->moveToThread(QCoreApplication::instance()->thread());
     m_updateTimer->setSingleShot(false);
     m_updateTimer->setInterval(UPDATE_INTERVAL_MS);
-    
-    // 使用Qt::QueuedConnection确保跨线程信号安全
+
     connect(m_updateTimer, &QTimer::timeout, this, &LogModel::processPendingUpdates, Qt::QueuedConnection);
 }
 

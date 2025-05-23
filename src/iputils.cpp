@@ -156,17 +156,21 @@ uint64_t IPUtils::getCIDRIPCount(const QString& cidr)
     QStringList parts = cidr.split('/');
     if (parts.size() != 2) return 0;
     
-    int prefix = parts[1].toInt();
+    bool ok;
+    int prefix = parts[1].toInt(&ok);
+    if (!ok) return 0;
     
     if (isIPv6(parts[0])) {
         if (prefix < 0 || prefix > 128) return 0;
         if (prefix <= 64) {
             return UINT64_MAX; // 范围太大，返回最大值
         }
-        return static_cast<uint64_t>(1) << (128 - prefix);
+        // 计算2的(128-prefix)次方
+        return (prefix == 128) ? 1 : (static_cast<uint64_t>(1) << (128 - prefix));
     } else {
         if (prefix < 0 || prefix > 32) return 0;
-        return static_cast<uint64_t>(1) << (32 - prefix);
+        // 对于IPv4，计算2的(32-prefix)次方
+        return (prefix == 32) ? 1 : (static_cast<uint64_t>(1) << (32 - prefix));
     }
 }
 

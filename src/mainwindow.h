@@ -56,37 +56,37 @@ private:
     void enableControls(bool enabled);
     void addLogMessage(const QString& message);
     
-    // UI Components
+    // UI组件
     QWidget* m_centralWidget;
     QSplitter* m_mainSplitter;
     QSplitter* m_rightSplitter;
     
-    // Left panel - CIDR input
+    // 左侧面板 - CIDR输入
     QTextEdit* m_cidrTextEdit;
     QPushButton* m_openFileButton;
     QPushButton* m_startButton;
     QPushButton* m_stopButton;
     QPushButton* m_saveButton;
     
-    // Settings
+    // 设置区域
     QSpinBox* m_threadCountSpinBox;
     QSpinBox* m_timeoutSpinBox;
-    QSpinBox* m_concurrentTasksSpinBox;  // 新增：最大并发任务控制
+    QSpinBox* m_concurrentTasksSpinBox;  //最大并发任务控制
     QCheckBox* m_enableLoggingCheckBox;
     
-    // Right panel - Results and logs
+    // 右侧面板 - 结果和日志
     QTableView* m_resultsTable;
     PingResultModel* m_resultsModel;
-    QTableView* m_logTable;  // 改为 TableView
-    LogModel* m_logModel;    // 新增日志模型
+    QTableView* m_logTable;  
+    LogModel* m_logModel;    //日志模型
     QPushButton* m_copyButton;
     
-    // Status
+    // 状态显示
     QProgressBar* m_progressBar;
     QLabel* m_statusLabel;
     QLabel* m_testCountLabel;
     
-    // Worker and data
+    // 工作线程与数据
     std::unique_ptr<PingWorker> m_pingWorker;
     QThread* m_workerThread;
     QTimer* m_updateTimer;
