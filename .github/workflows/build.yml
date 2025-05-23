@@ -66,14 +66,13 @@ jobs:
     - name: Configure CMake (Windows)
       if: matrix.os == 'windows-latest'
       continue-on-error: true
-      env:
-        VCPKG_ROOT: ${{ github.workspace }}/vcpkg
       run: |
         cmake -S . -B build -G "Ninja Multi-Config" `
           -DCMAKE_BUILD_TYPE=Release `
           -DCMAKE_PREFIX_PATH="${{ env.Qt5_Dir }}" `
           -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
-          -DVCPKG_TARGET_TRIPLET=x64-windows `
+          -DVCPKG_TARGET_TRIPLET=x64-windows-release `
+          -DVCPKG_MANIFEST_MODE=OFF `
           -DCMAKE_VERBOSE_MAKEFILE=ON
           
     - name: Configure CMake (macOS)

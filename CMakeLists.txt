@@ -15,34 +15,25 @@ find_package(Qt5 REQUIRED COMPONENTS Core Widgets Gui Network)
 
 # Handle Boost differently for vcpkg and system installation
 if(DEFINED ENV{VCPKG_ROOT} OR EXISTS "${CMAKE_SOURCE_DIR}/vcpkg")
-    # Using vcpkg - use CONFIG mode to avoid FindBoost module
-    find_package(Boost REQUIRED COMPONENTS system CONFIG)
-    # For vcpkg, also find asio (it might be header-only)
-    find_path(BOOST_ASIO_INCLUDE_DIR boost/asio.hpp 
-              PATHS ${CMAKE_PREFIX_PATH}/include 
-                    ${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/installed/x64-windows/include
-              NO_DEFAULT_PATH)
+    # Using vcpkg - find individual boost components
+    message(STATUS "Using vcpkg Boost")
     
-    if(NOT BOOST_ASIO_INCLUDE_DIR)
-        message(FATAL_ERROR "Boost.Asio not found! Please install boost-asio via vcpkg")
-    endif()
+    # Find boost-system first
+    find_package(boost_system REQUIRED CONFIG)
     
-    # For vcpkg, use target-based linking
-    set(BOOST_LIBRARIES Boost::system)
+    # Find boost-asio 
+    find_package(boost_asio REQUIRED CONFIG)
+    
+    # Set libraries for linking
+    set(BOOST_LIBRARIES Boost::system Boost::asio)
     
     # Debug: Print Boost information
-    message(STATUS "Using vcpkg Boost")
-    message(STATUS "Boost_FOUND: ${Boost_FOUND}")
-    message(STATUS "Boost_VERSION: ${Boost_VERSION}")
-    message(STATUS "Boost.Asio include dir: ${BOOST_ASIO_INCLUDE_DIR}")
-    if(TARGET Boost::system)
-        get_target_property(BOOST_INCLUDE_DIRS Boost::system INTERFACE_INCLUDE_DIRECTORIES)
-        message(STATUS "Boost include dirs: ${BOOST_INCLUDE_DIRS}")
-    endif()
+    message(STATUS "boost_system found")
+    message(STATUS "boost_asio found")
+    message(STATUS "Boost libraries: ${BOOST_LIBRARIES}")
 else()
     # System installation
-    find_package(Boost REQUIRED COMPONENTS system)
-    find_package(Boost REQUIRED COMPONENTS asio)
+    find_package(Boost REQUIRED COMPONENTS system asio)
     set(BOOST_LIBRARIES ${Boost_LIBRARIES})
     include_directories(${Boost_INCLUDE_DIRS})
 endif()
@@ -90,7 +81,9 @@ target_link_libraries(CFPing
 
 
 # Link Boost properly
-if(TARGET Boost::system)
+if(TARGET Boost::system AND TARGET Boost::asio)
+    target_link_libraries(CFPing Boost::system Boost::asio)
+elseif(TARGET Boost::system)
     target_link_libraries(CFPing Boost::system)
 else()
     target_link_libraries(CFPing ${BOOST_LIBRARIES})
