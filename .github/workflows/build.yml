@@ -19,7 +19,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
@@ -88,25 +88,30 @@ jobs:
         cd build
         cpack -G DragNDrop -C Release
         
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+    - name: Upload Windows artifacts
+      uses: actions/upload-artifact@v4
       with:
-        name: cfping-${{ matrix.os }}
-        path: build/_CPack_Packages/*/NSIS/*.exe
+        name: cfping-windows-latest
+        path: |
+          build/*.exe
+          build/_CPack_Packages/*/NSIS/*.exe
+        retention-days: 30
       if: matrix.os == 'windows-latest'
         
-    - name: Upload artifacts (Linux)
-      uses: actions/upload-artifact@v3
+    - name: Upload Linux artifacts
+      uses: actions/upload-artifact@v4
       with:
-        name: cfping-${{ matrix.os }}
+        name: cfping-ubuntu-latest
         path: |
           build/*.deb
           build/*.tar.gz
+        retention-days: 30
       if: matrix.os == 'ubuntu-latest'
         
-    - name: Upload artifacts (macOS)
-      uses: actions/upload-artifact@v3
+    - name: Upload macOS artifacts
+      uses: actions/upload-artifact@v4
       with:
-        name: cfping-${{ matrix.os }}
+        name: cfping-macos-latest
         path: build/*.dmg
+        retention-days: 30
       if: matrix.os == 'macos-latest'
