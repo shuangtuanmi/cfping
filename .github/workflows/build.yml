@@ -53,6 +53,13 @@ jobs:
         .\vcpkg\bootstrap-vcpkg.bat
         .\vcpkg\vcpkg.exe install boost-system:x64-windows
         
+    - name: Debug Boost installation (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        echo "Checking Boost installation..."
+        dir vcpkg\installed\x64-windows\include\boost
+        dir vcpkg\installed\x64-windows\lib
+        
     - name: Install dependencies (macOS)
       if: matrix.os == 'macos-latest'
       run: |
@@ -72,7 +79,8 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release `
           -DCMAKE_PREFIX_PATH="${{ env.Qt5_Dir }}" `
           -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
-          -DVCPKG_TARGET_TRIPLET=x64-windows
+          -DVCPKG_TARGET_TRIPLET=x64-windows `
+          -DCMAKE_VERBOSE_MAKEFILE=ON
           
     - name: Configure CMake (macOS)
       if: matrix.os == 'macos-latest'

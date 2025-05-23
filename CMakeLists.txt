@@ -1,4 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
+
+# Set policy for Boost to avoid warnings
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
+endif()
+
 project(CFPing)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -9,10 +15,19 @@ find_package(Qt5 REQUIRED COMPONENTS Core Widgets Gui Network)
 
 # Handle Boost differently for vcpkg and system installation
 if(DEFINED ENV{VCPKG_ROOT} OR EXISTS "${CMAKE_SOURCE_DIR}/vcpkg")
-    # Using vcpkg
-    find_package(Boost REQUIRED COMPONENTS system)
+    # Using vcpkg - use CONFIG mode to avoid FindBoost module
+    find_package(Boost REQUIRED COMPONENTS system CONFIG)
     # For vcpkg, use target-based linking
     set(BOOST_LIBRARIES Boost::system)
+    
+    # Debug: Print Boost information
+    message(STATUS "Using vcpkg Boost")
+    message(STATUS "Boost_FOUND: ${Boost_FOUND}")
+    message(STATUS "Boost_VERSION: ${Boost_VERSION}")
+    if(TARGET Boost::system)
+        get_target_property(BOOST_INCLUDE_DIRS Boost::system INTERFACE_INCLUDE_DIRECTORIES)
+        message(STATUS "Boost include dirs: ${BOOST_INCLUDE_DIRS}")
+    endif()
 else()
     # System installation
     find_package(Boost REQUIRED COMPONENTS system)
@@ -53,14 +68,21 @@ set(HEADERS
 # Create executable
 add_executable(CFPing ${SOURCES} ${HEADERS})
 
-# Link libraries
+# Link libraries - use target_link_libraries with proper targets
 target_link_libraries(CFPing 
     Qt5::Core 
     Qt5::Widgets 
     Qt5::Gui
     Qt5::Network
-    ${BOOST_LIBRARIES}
 )
+
+# Link Boost properly
+if(TARGET Boost::system)
+    target_link_libraries(CFPing Boost::system)
+else()
+    target_link_libraries(CFPing ${BOOST_LIBRARIES})
+    target_include_directories(CFPing PRIVATE ${Boost_INCLUDE_DIRS})
+endif()
 
 # Windows specific settings
 if(WIN32)
