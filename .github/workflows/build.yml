@@ -21,11 +21,19 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Install Qt
+    - name: Install Qt (Windows/Linux)
+      if: matrix.os != 'macos-latest'
       uses: jurplel/install-qt-action@v3
       with:
         version: ${{ matrix.qt-version }}
-        modules: 'qtnetwork qtwidgets qttools'
+        modules: 'qtnetworkauth'
+        
+    - name: Install Qt (macOS)
+      if: matrix.os == 'macos-latest'
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: ${{ matrix.qt-version }}
+        # macOS Qt 5.15.2 doesn't need separate modules, core components are included
         
     - name: Install dependencies (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
