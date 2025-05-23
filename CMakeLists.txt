@@ -18,22 +18,24 @@ if(DEFINED ENV{VCPKG_ROOT} OR EXISTS "${CMAKE_SOURCE_DIR}/vcpkg")
     # Using vcpkg - find individual boost components
     message(STATUS "Using vcpkg Boost")
     
-    # Find boost-system first
-    find_package(boost_system REQUIRED CONFIG)
+    # Try to find boost components via vcpkg
+    find_package(boost_system QUIET CONFIG)
+    find_package(boost_asio QUIET CONFIG)
     
-    # Find boost-asio 
-    find_package(boost_asio REQUIRED CONFIG)
-    
-    # Set libraries for linking
-    set(BOOST_LIBRARIES Boost::system Boost::asio)
-    
-    # Debug: Print Boost information
-    message(STATUS "boost_system found")
-    message(STATUS "boost_asio found")
-    message(STATUS "Boost libraries: ${BOOST_LIBRARIES}")
+    if(TARGET Boost::system AND TARGET Boost::asio)
+        set(BOOST_LIBRARIES Boost::system Boost::asio)
+        message(STATUS "Found vcpkg boost_system and boost_asio")
+    else()
+        # Fallback to traditional FindBoost
+        message(STATUS "Falling back to traditional Boost search")
+        find_package(Boost REQUIRED COMPONENTS system)
+        set(BOOST_LIBRARIES Boost::system)
+        include_directories(${Boost_INCLUDE_DIRS})
+    endif()
 else()
-    # System installation
-    find_package(Boost REQUIRED COMPONENTS system asio)
+    # System installation - traditional approach
+    message(STATUS "Using system Boost")
+    find_package(Boost REQUIRED COMPONENTS system)
     set(BOOST_LIBRARIES ${Boost_LIBRARIES})
     include_directories(${Boost_INCLUDE_DIRS})
 endif()

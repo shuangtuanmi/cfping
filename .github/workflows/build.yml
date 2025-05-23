@@ -46,14 +46,40 @@ jobs:
         
     - name: Install dependencies (Windows)
       if: matrix.os == 'windows-latest'
-      uses: johnwason/vcpkg-action@v6
-      id: vcpkg
-      with:
-        pkgs: boost-asio
-        triplet: x64-windows-release
-        token: ${{ github.token }}
-        github-binarycache: true
-             
+      run: |
+        # Install ninja first
+        choco install ninja
+        
+        # Setup vcpkg manually for better control
+        git clone https://github.com/Microsoft/vcpkg.git
+        .\vcpkg\bootstrap-vcpkg.bat
+        
+        # Install boost packages
+        .\vcpkg\vcpkg.exe install boost-system:x64-windows-release
+        .\vcpkg\vcpkg.exe install boost-asio:x64-windows-release
+        
+        # Verify installation
+        echo "Checking installed packages:"
+        .\vcpkg\vcpkg.exe list
+        
+    - name: Debug Boost installation (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        echo "Checking Boost installation..."
+        if (Test-Path "vcpkg\installed\x64-windows-release\include\boost") {
+          echo "Boost headers found in x64-windows-release"
+          dir vcpkg\installed\x64-windows-release\include\boost | Select-Object -First 10
+        }
+        if (Test-Path "vcpkg\installed\x64-windows-release\lib") {
+          echo "Boost libraries found:"
+          dir vcpkg\installed\x64-windows-release\lib | Select-Object -First 10
+        }
+        if (Test-Path "vcpkg\installed\x64-windows-release\include\boost\asio.hpp") {
+          echo "boost/asio.hpp found!"
+        } else {
+          echo "boost/asio.hpp NOT found!"
+        }
+        
     - name: Install dependencies (macOS)
       if: matrix.os == 'macos-latest'
       run: |
@@ -66,14 +92,15 @@ jobs:
     - name: Configure CMake (Windows)
       if: matrix.os == 'windows-latest'
       continue-on-error: true
+      env:
+        VCPKG_ROOT: ${{ github.workspace }}/vcpkg
       run: |
         cmake -S . -B build -G "Ninja Multi-Config" `
           -DCMAKE_BUILD_TYPE=Release `
           -DCMAKE_PREFIX_PATH="${{ env.Qt5_Dir }}" `
           -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
           -DVCPKG_TARGET_TRIPLET=x64-windows-release `
-          -DVCPKG_MANIFEST_MODE=OFF `
-          -DCMAKE_VERBOSE_MAKEFILE=ON
+          -DVCPKG_MANIFEST_MODE=OFF
           
     - name: Configure CMake (macOS)
       if: matrix.os == 'macos-latest'
