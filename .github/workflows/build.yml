@@ -47,7 +47,10 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
-        sudo apt-get install -y ninja-build libboost-all-dev
+        sudo apt-get install -y ninja-build libboost-all-dev libboost-system-dev libboost-thread-dev
+        
+        # Check installed Boost version for dependency tracking
+        dpkg -l | grep libboost-system
         
     - name: Install dependencies (Windows)
       if: matrix.os == 'windows-latest'
@@ -122,7 +125,10 @@ jobs:
       run: |
         cmake -S . -B build -G "Ninja Multi-Config" \
           -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_PREFIX_PATH="${{ env.Qt5_Dir }}"
+          -DCMAKE_PREFIX_PATH="${{ env.Qt5_Dir }}" \
+          -DBoost_USE_STATIC_LIBS=OFF \
+          -DBoost_USE_MULTITHREADED=ON \
+          -DCPACK_DEBIAN_PACKAGE_DEPENDS="libboost-system1.74.0 (>= 1.74.0), libboost-thread1.74.0 (>= 1.74.0), libqt5core5a (>= 5.15.0), libqt5gui5 (>= 5.15.0), libqt5widgets5 (>= 5.15.0), libqt5network5 (>= 5.15.0)"
           
     - name: Build
       continue-on-error: true
@@ -133,8 +139,25 @@ jobs:
       continue-on-error: true
       run: |
         cd build
+        
+        # Get actual Boost version installed
+        BOOST_VERSION=$(dpkg -l | grep libboost-system | awk '{print $3}' | cut -d'-' -f1)
+        echo "Detected Boost version: $BOOST_VERSION"
+        
+        # Update CPack with correct dependencies
+        cat >> CPackConfig.cmake << EOF
+        SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libboost-system1.74.0 (>= 1.74.0), libboost-thread1.74.0 (>= 1.74.0), libqt5core5a (>= 5.15.0), libqt5gui5 (>= 5.15.0), libqt5widgets5 (>= 5.15.0), libqt5network5 (>= 5.15.0)")
+        SET(CPACK_DEBIAN_PACKAGE_SECTION "utils")
+        SET(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+        SET(CPACK_DEBIAN_PACKAGE_DESCRIPTION "CFPing - A Qt-based ping utility")
+        EOF
+        
         cpack -G DEB -C Release
         cpack -G TGZ -C Release
+        
+        # Verify DEB package dependencies
+        echo "Checking DEB package info:"
+        dpkg-deb -I *.deb
         
     - name: Package (Windows)
       if: matrix.os == 'windows-latest'
