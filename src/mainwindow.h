@@ -1,4 +1,4 @@
-#ifndef MAINWINDOW_H
+﻿#ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
 #include <QtWidgets/QMainWindow>
@@ -18,15 +18,16 @@
 #include <QtWidgets/QSpinBox>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QApplication>
-#include <QtGui/QClipboard>
-#include <QtCore/QThread>
-#include <QtCore/QTimer>
-#include <QtCore/QDateTime>
-#include <QtCore/QCoreApplication>
+#include <QClipboard>
+#include <QThread>
+#include <QTimer>
+#include <QDateTime>
+#include <QCoreApplication>
 #include <memory>
 
 class PingWorker;
 class PingResultModel;
+class LogModel;
 struct PingResult;
 
 class MainWindow : public QMainWindow
@@ -70,12 +71,14 @@ private:
     // Settings
     QSpinBox* m_threadCountSpinBox;
     QSpinBox* m_timeoutSpinBox;
+    QSpinBox* m_concurrentTasksSpinBox;  // 新增：最大并发任务控制
     QCheckBox* m_enableLoggingCheckBox;
     
     // Right panel - Results and logs
     QTableView* m_resultsTable;
     PingResultModel* m_resultsModel;
-    QPlainTextEdit* m_logTextEdit;
+    QTableView* m_logTable;  // 改为 TableView
+    LogModel* m_logModel;    // 新增日志模型
     QPushButton* m_copyButton;
     
     // Status

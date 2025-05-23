@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "pingworker.h"
 #include "pingresultmodel.h"
+#include "logmodel.h"
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMessageBox>
 #include <QClipboard>
@@ -53,7 +54,7 @@ void MainWindow::setupUI()
     // CIDR input
     leftLayout->addWidget(new QLabel("CIDR地址段:"));
     m_cidrTextEdit = new QTextEdit();
-    m_cidrTextEdit->setPlainText("# 输入CIDR地址段 (每行一个)\n# 示例:\n104.16.0.0/13\n104.24.0.0/14\n108.162.192.0/18");
+    m_cidrTextEdit->setPlainText("# 输入CIDR地址段 (每行一个)\n# IPv4示例:\n104.16.0.0/13\n104.24.0.0/14\n108.162.192.0/18\n# IPv6示例:\n2606:4700::/32\n2a06:98c0::/29");
     leftLayout->addWidget(m_cidrTextEdit);
     
     // File operations
@@ -77,8 +78,15 @@ void MainWindow::setupUI()
     m_timeoutSpinBox->setValue(500);
     settingsLayout->addWidget(m_timeoutSpinBox, 1, 1);
     
+    settingsLayout->addWidget(new QLabel("最大并发任务:"), 2, 0);
+    m_concurrentTasksSpinBox = new QSpinBox();
+    m_concurrentTasksSpinBox->setRange(100, 10000);
+    m_concurrentTasksSpinBox->setValue(2000);
+    m_concurrentTasksSpinBox->setSingleStep(100);
+    settingsLayout->addWidget(m_concurrentTasksSpinBox, 2, 1);
+    
     m_enableLoggingCheckBox = new QCheckBox("启用详细日志");
-    settingsLayout->addWidget(m_enableLoggingCheckBox, 2, 0, 1, 2);
+    settingsLayout->addWidget(m_enableLoggingCheckBox, 3, 0, 1, 2);
     
     leftLayout->addLayout(settingsLayout);
     
@@ -137,14 +145,30 @@ void MainWindow::setupUI()
     
     resultsLayout->addWidget(m_resultsTable);
     
-    // Logs
+    // Logs - 改为使用 TableView 和模型
     QWidget* logsWidget = new QWidget();
     QVBoxLayout* logsLayout = new QVBoxLayout(logsWidget);
-    logsLayout->addWidget(new QLabel("日志:"));
+    logsLayout->addWidget(new QLabel("日志 (最近100条):"));
     
-    m_logTextEdit = new QPlainTextEdit();
-    m_logTextEdit->setMaximumBlockCount(1000); // Limit log size
-    logsLayout->addWidget(m_logTextEdit);
+    m_logModel = new LogModel(this);
+    m_logTable = new QTableView();
+    m_logTable->setModel(m_logModel);
+    m_logTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_logTable->setAlternatingRowColors(true);
+    m_logTable->setSortingEnabled(false);
+    m_logTable->setShowGrid(false);
+    m_logTable->verticalHeader()->setVisible(false);
+    
+    // 设置日志表格列宽
+    m_logTable->horizontalHeader()->resizeSection(0, 80);  // 时间列
+    m_logTable->horizontalHeader()->setStretchLastSection(true); // 消息列自动拉伸
+    
+    // 自动滚动到最新日志
+    connect(m_logModel, &LogModel::rowsInserted, this, [this]() {
+        m_logTable->scrollToBottom();
+    });
+    
+    logsLayout->addWidget(m_logTable);
     
     m_rightSplitter->addWidget(resultsWidget);
     m_rightSplitter->addWidget(logsWidget);
@@ -214,8 +238,8 @@ void MainWindow::startPing()
     // Clear results model
     m_resultsModel->clear();
 
-    // Clear logs   
-    m_logTextEdit->clear();
+    // Clear logs - 使用新的模型方法
+    m_logModel->clear();
     
     // Create worker
     try {
@@ -226,13 +250,14 @@ void MainWindow::startPing()
         // 使用临时变量存储设置，避免lambda捕获this
         int threadCount = m_threadCountSpinBox->value();
         int timeout = m_timeoutSpinBox->value();
+        int maxConcurrentTasks = m_concurrentTasksSpinBox->value();
         bool enableLogging = m_enableLoggingCheckBox->isChecked();
         QStringList ranges = cidrRanges;
         
         // Connect signals
-        connect(m_workerThread, &QThread::started, [this, threadCount, timeout, enableLogging, ranges]() {
+        connect(m_workerThread, &QThread::started, [this, threadCount, timeout, enableLogging, maxConcurrentTasks, ranges]() {
             if (m_pingWorker) {
-                m_pingWorker->setSettings(threadCount, timeout, enableLogging);
+                m_pingWorker->setSettings(threadCount, timeout, enableLogging, maxConcurrentTasks);
                 m_pingWorker->startPing(ranges);
             }
         });
@@ -265,40 +290,36 @@ void MainWindow::stopPing()
     
     // 立即更新UI状态，让用户知道停止请求已收到
     m_statusLabel->setText("正在停止...");
-    m_stopButton->setEnabled(false);  // 防止重复点击
+    m_stopButton->setEnabled(false);
     addLogMessage("收到停止请求，正在停止测试...");
     
     // 立即停止UI更新定时器
     m_updateTimer->stop();
     
-    // 使用QTimer::singleShot在事件循环中异步处理停止逻辑
-    QTimer::singleShot(0, this, [this]() {
-        // 通知工作线程停止
-        if (m_pingWorker) {
-            // 使用Qt::DirectConnection确保立即调用
-            QMetaObject::invokeMethod(m_pingWorker.get(), "stopPing", Qt::DirectConnection);
-        }
-        
-        // 设置较短的超时时间
-        QTimer::singleShot(2000, this, [this]() {
-            if (m_isRunning) {
-                addLogMessage("强制停止测试...");
-                
-                if (m_workerThread && m_workerThread->isRunning()) {
-                    // 断开信号连接防止崩溃
-                    if (m_pingWorker) {
-                        m_pingWorker->disconnect();
-                    }
-                    
-                    // 强制终止线程
-                    m_workerThread->terminate();
-                    m_workerThread->wait(1000);
+    // 通知工作线程停止
+    if (m_pingWorker) {
+        QMetaObject::invokeMethod(m_pingWorker.get(), "stopPing", Qt::QueuedConnection);
+    }
+    
+    // 设置更长的超时时间，给协程足够时间清理
+    QTimer::singleShot(3000, this, [this]() {
+        if (m_isRunning) {
+            addLogMessage("强制停止测试...");
+            
+            if (m_workerThread && m_workerThread->isRunning()) {
+                // 断开信号连接防止崩溃
+                if (m_pingWorker) {
+                    m_pingWorker->disconnect();
                 }
                 
-                // 强制恢复UI状态
-                onPingFinished();
+                // 强制终止线程
+                m_workerThread->terminate();
+                m_workerThread->wait(1000);
             }
-        });
+            
+            // 强制恢复UI状态
+            onPingFinished();
+        }
     });
     
     // 立即处理挂起的事件，确保UI响应
@@ -367,18 +388,18 @@ void MainWindow::onPingFinished()
     // 立即恢复控件状态
     enableControls(true);
     updateResultsDisplay();
-    addLogMessage("测试已停止。");
+    addLogMessage("测试已完成。");
     
-    m_statusLabel->setText("已停止");
+    m_statusLabel->setText("已完成");
     
-    // 异步清理线程资源
-    QTimer::singleShot(0, this, [this]() {
+    // 异步清理线程资源，给更多时间
+    QTimer::singleShot(1000, this, [this]() {
         if (m_workerThread) {
             if (m_workerThread->isRunning()) {
                 m_workerThread->quit();
-                if (!m_workerThread->wait(1000)) {
+                if (!m_workerThread->wait(2000)) {
                     m_workerThread->terminate();
-                    m_workerThread->wait(500);
+                    m_workerThread->wait(1000);
                 }
             }
             m_workerThread->deleteLater();
@@ -422,6 +443,7 @@ void MainWindow::enableControls(bool enabled)
     m_openFileButton->setEnabled(enabled);
     m_threadCountSpinBox->setEnabled(enabled);
     m_timeoutSpinBox->setEnabled(enabled);
+    m_concurrentTasksSpinBox->setEnabled(enabled);
     m_enableLoggingCheckBox->setEnabled(enabled);
     
     if (enabled) {
@@ -434,12 +456,8 @@ void MainWindow::enableControls(bool enabled)
 
 void MainWindow::addLogMessage(const QString& message)
 {
-    // 跨线程安全的日志记录
-    QString timestamp = QDateTime::currentDateTime().toString("hh:mm:ss");
-    QString logMessage = QString("[%1] %2").arg(timestamp, message);
-    
-    // 使用BlockingQueuedConnection以防止在工作线程中创建的日志过多导致内存问题
-    QMetaObject::invokeMethod(m_logTextEdit, "appendPlainText", 
-                             QThread::currentThread() != qApp->thread() ? Qt::BlockingQueuedConnection : Qt::DirectConnection,
-                             Q_ARG(QString, logMessage));
+    // 使用新的日志模型，性能更好
+    if (m_logModel) {
+        m_logModel->addLogMessage(message);
+    }
 }

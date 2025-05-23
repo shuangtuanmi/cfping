@@ -12,75 +12,112 @@
 PingWorker::PingWorker(QObject *parent)
     : QObject(parent)
     , m_ioContext(std::make_unique<boost::asio::io_context>())
+    , m_cancellationSignal(std::make_unique<boost::asio::cancellation_signal>())
     , m_cidrExpander(std::make_unique<CidrExpander>(this))
     , m_batchTimer(new QTimer(this))
     , m_stopCheckTimer(new QTimer(this))
+    , m_cleanupTimer(new QTimer(this))
     , m_running(false)
     , m_stopRequested(false)
+    , m_cleanupInProgress(false)
     , m_completedCount(0)
     , m_totalCount(0)
     , m_activePings(0)
     , m_threadCount(4)
     , m_timeoutMs(1000)
+    , m_maxConcurrentTasks(DEFAULT_MAX_CONCURRENT_PINGS)
     , m_enableLogging(false)
 {
     connect(m_batchTimer, &QTimer::timeout, this, &PingWorker::processNextBatch);
-    m_batchTimer->setInterval(50); // 更频繁的批次处理
+    m_batchTimer->setInterval(10); // 更频繁的任务检查
     
-    // 新增：停止检查定时器
     connect(m_stopCheckTimer, &QTimer::timeout, this, [this]() {
-        if (m_stopRequested.load()) {
-            cleanup();
+        if (m_stopRequested.load() && !m_cleanupInProgress.load()) {
+            safeCleanup();
         }
     });
     m_stopCheckTimer->setInterval(100); // 每100ms检查一次停止状态
+    
+    // 延迟清理定时器
+    connect(m_cleanupTimer, &QTimer::timeout, this, [this]() {
+        cleanup();
+    });
+    m_cleanupTimer->setSingleShot(true);
 }
 
 PingWorker::~PingWorker()
 {
-    stopPing();
+    if (m_running.load()) {
+        stopPing();
+        // 等待清理完成
+        int waitCount = 0;
+        while (m_running.load() && waitCount < 30) { // 最多等待3秒
+            QThread::msleep(100);
+            waitCount++;
+        }
+    }
 }
 
-void PingWorker::setSettings(int threadCount, int timeoutMs, bool enableLogging)
+void PingWorker::setSettings(int threadCount, int timeoutMs, bool enableLogging, int maxConcurrentTasks)
 {
     m_threadCount = threadCount;
     m_timeoutMs = timeoutMs;
     m_enableLogging = enableLogging;
+    m_maxConcurrentTasks = maxConcurrentTasks > 0 ? maxConcurrentTasks : DEFAULT_MAX_CONCURRENT_PINGS;
 }
 
 void PingWorker::startPing(const QStringList& cidrRanges)
 {
-    if (m_running.load()) return;
+    if (m_running.load() || m_cleanupInProgress.load()) return;
     
     m_running = true;
     m_stopRequested = false;
+    m_cleanupInProgress = false;
     m_completedCount = 0;
     m_activePings = 0;
     
-    // Setup CIDR expander
+    // 重置取消信号
+    m_cancellationSignal = std::make_unique<boost::asio::cancellation_signal>();
+    
     m_cidrExpander->setCidrRanges(cidrRanges);
     m_totalCount = static_cast<int>(m_cidrExpander->getTotalIPCount());
     
-    emit logMessage(QString("Starting ping test for %1 IP addresses with %2 threads")
+    emit logMessage(QString("Starting TCP connection test for %1 IP addresses with %2 threads (IPv4/IPv6 supported)")
                    .arg(m_totalCount).arg(m_threadCount));
     
-    // Create work guard to keep io_context alive
+
     m_workGuard = std::make_unique<boost::asio::executor_work_guard<boost::asio::io_context::executor_type>>(
         m_ioContext->get_executor());
     
-    // Start worker threads
     m_threads.clear();
     for (int i = 0; i < m_threadCount; ++i) {
         m_threads.emplace_back([this]() {
             try {
-                m_ioContext->run();
-            } catch (const std::exception& e) {
-                emit logMessage(QString("Worker thread error: %1").arg(e.what()));
+                // 设置线程局部的异常处理
+                while (!m_stopRequested.load() && !m_ioContext->stopped()) {
+                    try {
+                        m_ioContext->run();
+                        break; // 正常退出
+                    } catch (const boost::system::system_error& e) {
+                        // 忽略取消相关的错误
+                        if (e.code() != boost::asio::error::operation_aborted) {
+                            emit logMessage(QString("Worker thread system error: %1").arg(e.code().value()));
+                        }
+                        if (m_stopRequested.load()) break;
+                    } catch (const std::exception& e) {
+                        emit logMessage(QString("Worker thread error: %1").arg(e.what()));
+                        if (m_stopRequested.load()) break;
+                    }
+                    
+                    // 短暂休眠后重试
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
+            } catch (...) {
+                emit logMessage("Worker thread encountered unexpected error");
             }
         });
     }
     
-    // 启动定时器
     m_stopCheckTimer->start();
     m_batchTimer->start();
     processNextBatch();
@@ -88,7 +125,7 @@ void PingWorker::startPing(const QStringList& cidrRanges)
 
 void PingWorker::stopPing()
 {
-    if (!m_running.load()) return;
+    if (!m_running.load() || m_cleanupInProgress.load()) return;
     
     emit logMessage("Stop request received...");
     m_stopRequested = true;
@@ -96,10 +133,34 @@ void PingWorker::stopPing()
     // 立即停止批次处理
     m_batchTimer->stop();
     
-    // 使用定时器异步执行清理，避免阻塞
-    QTimer::singleShot(0, this, [this]() {
-        cleanup();
-    });
+    // 发送取消信号给所有协程
+    if (m_cancellationSignal) {
+        try {
+            #undef emit
+            m_cancellationSignal->boost::asio::cancellation_signal::emit(boost::asio::cancellation_type::all);
+            #define emit Q_EMIT
+        } catch (...) {
+            // 忽略取消信号错误
+        }
+    }
+    
+    // 使用定时器延迟执行清理，给协程一些时间完成
+    m_cleanupTimer->start(500); // 500ms后开始清理
+}
+
+void PingWorker::safeCleanup()
+{
+    if (m_cleanupInProgress.load()) return;
+    
+    m_cleanupInProgress = true;
+    emit logMessage("Starting safe cleanup...");
+    
+    // 停止所有定时器
+    m_batchTimer->stop();
+    m_stopCheckTimer->stop();
+    
+    // 启动清理定时器
+    m_cleanupTimer->start(100);
 }
 
 void PingWorker::cleanup()
@@ -108,22 +169,34 @@ void PingWorker::cleanup()
     
     emit logMessage("Cleaning up...");
     m_running = false;
-    m_stopCheckTimer->stop();
     
-    // Stop io_context
+    // 停止io_context，这会导致所有协程被取消
     if (m_workGuard) {
         m_workGuard.reset();
     }
     
     if (m_ioContext) {
-        m_ioContext->stop();
+        try {
+            m_ioContext->stop();
+        } catch (...) {
+            // 忽略停止时的错误
+        }
     }
     
-    // Wait for threads to finish with timeout
+    // 等待线程完成，使用更短的超时时间
     for (auto& thread : m_threads) {
         if (thread.joinable()) {
-            // 使用detach而不是join，避免长时间阻塞
-            thread.detach();
+            // 尝试正常等待100ms
+            auto start = std::chrono::steady_clock::now();
+            while (thread.joinable() && 
+                   std::chrono::steady_clock::now() - start < std::chrono::milliseconds(100)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            
+            // 如果还在运行，则分离线程
+            if (thread.joinable()) {
+                thread.detach();
+            }
         }
     }
     m_threads.clear();
@@ -135,9 +208,15 @@ void PingWorker::cleanup()
         m_ipQueue.swap(empty);
     }
     
-    // Reset io_context for next use
-    m_ioContext = std::make_unique<boost::asio::io_context>();
+    // 重置io_context，准备下次使用
+    try {
+        m_ioContext = std::make_unique<boost::asio::io_context>();
+        m_cancellationSignal = std::make_unique<boost::asio::cancellation_signal>();
+    } catch (...) {
+        emit logMessage("Error resetting io_context");
+    }
     
+    m_cleanupInProgress = false;
     emit finished();
 }
 
@@ -148,16 +227,19 @@ void PingWorker::processNextBatch()
         return;
     }
     
-    // 限制并发ping数量
-    if (m_activePings.load() >= MAX_CONCURRENT_PINGS) {
-        return;
-    }
+    // 检查是否已处理完所有IP
+    bool allIPsProcessed = !m_cidrExpander->hasMore();
     
-    if (!m_cidrExpander->hasMore()) {
-        // 等待活跃ping完成
-        if (m_activePings.load() == 0) {
+    // 只要活跃任务数低于最大并发数且还有IP要处理，就持续添加新任务
+    int currentActive = m_activePings.load();
+    int availableSlots = m_maxConcurrentTasks - currentActive;
+    
+    // 如果没有可用槽位，继续等待下一次定时器触发
+    if (availableSlots <= 0) {
+        // 如果所有IP已处理完且没有活跃任务，则可以结束了
+        if (allIPsProcessed && currentActive == 0) {
             m_batchTimer->stop();
-            QTimer::singleShot(1000, this, [this]() {
+            QTimer::singleShot(100, this, [this]() {
                 if (m_running.load() && !m_stopRequested.load()) {
                     cleanup();
                 }
@@ -166,25 +248,44 @@ void PingWorker::processNextBatch()
         return;
     }
     
-    QStringList batch = m_cidrExpander->getNextBatch(BATCH_SIZE);
+    // 如果已经没有IP要处理了
+    if (allIPsProcessed) {
+        // 还有活跃任务，继续等待它们完成
+        return;
+    }
     
-    for (const QString& ip : batch) {
+    // 确定本次要处理的IP数量
+    int batchSize = std::min(availableSlots, BATCH_SIZE);
+    QStringList ips = m_cidrExpander->getNextBatch(batchSize);
+    
+    for (const QString& ip : ips) {
         // 再次检查停止状态
         if (m_stopRequested.load()) {
             break;
         }
         
-        {
-            std::lock_guard<std::mutex> lock(m_queueMutex);
-            m_ipQueue.push(ip);
-        }
-        
         // 增加活跃ping计数
         m_activePings++;
         
-        // Spawn coroutine for this IP
+        // 预先转换IP为boost::asio::ip::address，避免在协程中进行字符串操作
+        boost::system::error_code ec;
+        auto address = boost::asio::ip::make_address(ip.toStdString(), ec);
+        
+        if (ec) {
+            // IP地址无效，直接处理
+            emit pingResult(ip, 0.0, false);
+            if (m_enableLogging) {
+                emit logMessage(QString("Invalid IP address: %1").arg(ip));
+            }
+            m_completedCount++;
+            m_activePings--;
+            continue;
+        }
+        
+        // 将有效的地址和原始IP字符串一起传递给协程
+        QString ipCopy = ip; // 复制IP字符串
         boost::asio::co_spawn(*m_ioContext, 
-                             processPingQueue(), 
+                             pingIPWithAddress(address, ipCopy), 
                              boost::asio::detached);
     }
     
@@ -193,30 +294,15 @@ void PingWorker::processNextBatch()
 
 boost::asio::awaitable<void> PingWorker::processPingQueue()
 {
-    QString ip;
-    {
-        std::lock_guard<std::mutex> lock(m_queueMutex);
-        if (m_ipQueue.empty()) {
-            m_activePings--;
-            co_return;
-        }
-        ip = m_ipQueue.front();
-        m_ipQueue.pop();
-    }
-    
-    if (!ip.isEmpty() && !m_stopRequested.load()) {
-        co_await pingIP(ip);
-    }
-    
-    // 减少活跃ping计数
-    m_activePings--;
+    co_return;
 }
 
-boost::asio::awaitable<void> PingWorker::pingIP(const QString& ip)
+boost::asio::awaitable<void> PingWorker::pingIPWithAddress(boost::asio::ip::address address, QString originalIP)
 {
     try {
         // 早期检查停止状态
         if (m_stopRequested.load()) {
+            m_activePings--;
             co_return;
         }
         
@@ -225,106 +311,114 @@ boost::asio::awaitable<void> PingWorker::pingIP(const QString& ip)
         
         auto start_time = std::chrono::steady_clock::now();
         
-        // Create endpoint for HTTP port (80) - commonly open on CDN servers
-        boost::system::error_code ec;
-        auto address = boost::asio::ip::make_address(ip.toStdString(), ec);
-        
-        if (ec || m_stopRequested.load()) {
-            if (!m_stopRequested.load()) {
-                emit pingResult(ip, 0.0, false);
-                if (m_enableLogging) {
-                    emit logMessage(QString("Invalid IP address: %1").arg(ip));
-                }
-            }
-            m_completedCount++;
-            co_return;
-        }
-        
+        // 创建端点，IPv6和IPv4都使用端口80
         boost::asio::ip::tcp::endpoint endpoint(address, 80);
-        
-        // Setup timeout - 使用更短的超时时间提高响应性
+       
         boost::asio::steady_timer timer(executor);
         timer.expires_after(std::chrono::milliseconds(std::min(m_timeoutMs, 2000)));
         
-        // Use experimental awaitable operators for race condition
         using namespace boost::asio::experimental::awaitable_operators;
-        
+
         try {
             // 在连接前再次检查停止状态
             if (m_stopRequested.load()) {
+                m_activePings--;
                 co_return;
             }
-            
-            // Try to connect with timeout
-            auto result = co_await (
-                socket.async_connect(endpoint, boost::asio::use_awaitable) ||
-                timer.async_wait(boost::asio::use_awaitable)
+           
+
+            auto variant_result = co_await (
+                socket.async_connect(endpoint, boost::asio::as_tuple(boost::asio::use_awaitable)) ||
+                timer.async_wait(boost::asio::as_tuple(boost::asio::use_awaitable))
             );
-            
-            // 连接后检查停止状态
-            if (m_stopRequested.load()) {
-                boost::system::error_code close_ec;
-                socket.close(close_ec);
-                co_return;
+            std::size_t which = variant_result.index();
+            boost::system::error_code ec2;
+            if (which == 0) {
+                ec2 = std::get<0>(std::get<0>(variant_result));
+            } else {
+                ec2 = std::get<0>(std::get<1>(variant_result));
             }
-            
             auto end_time = std::chrono::steady_clock::now();
             double latency = IPUtils::calculateLatency(start_time, end_time);
-            
-            bool success = result.index() == 0; // First alternative completed (connect, not timeout)
+            bool success = (which == 0 && !ec2);
             
             if (success) {
-                // Close the socket gracefully
                 boost::system::error_code close_ec;
                 socket.shutdown(boost::asio::ip::tcp::socket::shutdown_both, close_ec);
                 socket.close(close_ec);
             }
             
             if (!m_stopRequested.load()) {
-                emit pingResult(ip, latency, success);
-                
-                if (m_enableLogging) {
-                    if (success) {
-                        emit logMessage(QString("TCP connect %1:80: %2ms").arg(ip).arg(latency, 0, 'f', 2));
-                    } else {
-                        emit logMessage(QString("TCP connect %1:80 timeout").arg(ip));
+                QMetaObject::invokeMethod(this, [this, originalIP, latency, success]() {
+                    emit pingResult(originalIP, latency, success);
+                    
+                    if (m_enableLogging) {
+                        if (success) {
+                            // IPv6地址可能很长，使用适当的格式
+                            QString protocol = originalIP.contains(':') ? "IPv6" : "IPv4";
+                            emit logMessage(QString("TCP connect %1 (%2):80: %3ms")
+                                           .arg(originalIP).arg(protocol).arg(latency, 0, 'f', 2));
+                        } else {
+                            emit logMessage(QString("TCP connect %1:80 timeout").arg(originalIP));
+                        }
                     }
-                }
+                }, Qt::QueuedConnection);
             }
             
         } catch (const boost::system::system_error& e) {
             if (m_stopRequested.load()) {
+                m_activePings--;
                 co_return;
             }
             
             auto end_time = std::chrono::steady_clock::now();
             double latency = IPUtils::calculateLatency(start_time, end_time);
             
-            // Check if it's a "connection refused" error, which means the IP is reachable
-            // but the port is closed - this is still a valid response for CDN testing
             bool isReachable = (e.code() == boost::asio::error::connection_refused);
             
-            emit pingResult(ip, latency, isReachable);
-            
-            if (m_enableLogging) {
-                if (isReachable) {
-                    emit logMessage(QString("TCP connect %1:80: %2ms (port closed but reachable)")
-                                   .arg(ip).arg(latency, 0, 'f', 2));
-                } else {
-                    emit logMessage(QString("TCP connect %1:80 failed: %2")
-                                   .arg(ip, e.what()));
-                }
+            // 忽略取消相关的错误
+            if (e.code() != boost::asio::error::operation_aborted) {
+                QMetaObject::invokeMethod(this, [this, originalIP, latency, isReachable]() {
+                    emit pingResult(originalIP, latency, isReachable);
+                    
+                    if (m_enableLogging) {
+                        QString protocol = originalIP.contains(':') ? "IPv6" : "IPv4";
+                        if (isReachable) {
+                            emit logMessage(QString("TCP connect %1 (%2):80: %3ms (port closed but reachable)")
+                                           .arg(originalIP).arg(protocol).arg(latency, 0, 'f', 2));
+                        } else {
+                            emit logMessage(QString("TCP connect %1 (%2):80 failed")
+                                           .arg(originalIP).arg(protocol));
+                        }
+                    }
+                }, Qt::QueuedConnection);
+            }
+        } catch (const std::exception& e) {
+            if (!m_stopRequested.load()) {
+                QMetaObject::invokeMethod(this, [this, originalIP]() {
+                    emit pingResult(originalIP, 0.0, false);
+                    if (m_enableLogging) {
+                        QString protocol = originalIP.contains(':') ? "IPv6" : "IPv4";
+                        emit logMessage(QString("TCP connect %1 (%2) failed with exception")
+                                       .arg(originalIP).arg(protocol));
+                    }
+                }, Qt::QueuedConnection);
             }
         }
         
     } catch (const std::exception& e) {
         if (!m_stopRequested.load()) {
-            emit pingResult(ip, 0.0, false);
-            if (m_enableLogging) {
-                emit logMessage(QString("TCP connect %1 failed: %2").arg(ip, e.what()));
-            }
+            QMetaObject::invokeMethod(this, [this, originalIP]() {
+                emit pingResult(originalIP, 0.0, false);
+                if (m_enableLogging) {
+                    QString protocol = originalIP.contains(':') ? "IPv6" : "IPv4";
+                    emit logMessage(QString("TCP connect %1 (%2) failed with exception")
+                                   .arg(originalIP).arg(protocol));
+                }
+            }, Qt::QueuedConnection);
         }
     }
     
     m_completedCount++;
+    m_activePings--;
 }

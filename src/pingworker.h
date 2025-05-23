@@ -1,13 +1,15 @@
-#ifndef PINGWORKER_H
+﻿#ifndef PINGWORKER_H
 #define PINGWORKER_H
 
-#include <QtCore/QObject>
-#include <QtCore/QString>
-#include <QtCore/QTimer>
+#include <QObject>
+#include <QString>
+#include <QTimer>
+#include <QThread>
 #include <boost/asio.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/cancellation_signal.hpp>
 #include <memory>
 #include <atomic>
 #include <vector>
@@ -25,7 +27,7 @@ public:
     explicit PingWorker(QObject *parent = nullptr);
     ~PingWorker();
 
-    void setSettings(int threadCount, int timeoutMs, bool enableLogging);
+    void setSettings(int threadCount, int timeoutMs, bool enableLogging, int maxConcurrentTasks);
 
 public slots:
     void startPing(const QStringList& cidrRanges);
@@ -38,14 +40,15 @@ signals:
     void finished();
 
 private:
-    // TCP connection test instead of ICMP ping (no admin rights required)
-    boost::asio::awaitable<void> pingIP(const QString& ip);
+    boost::asio::awaitable<void> pingIPWithAddress(boost::asio::ip::address address, QString originalIP);
     boost::asio::awaitable<void> processPingQueue();
     void processNextBatch();
     void cleanup();
+    void safeCleanup();
     
     std::unique_ptr<boost::asio::io_context> m_ioContext;
     std::unique_ptr<boost::asio::executor_work_guard<boost::asio::io_context::executor_type>> m_workGuard;
+    std::unique_ptr<boost::asio::cancellation_signal> m_cancellationSignal;
     std::vector<std::thread> m_threads;
     std::unique_ptr<CidrExpander> m_cidrExpander;
     
@@ -53,20 +56,23 @@ private:
     std::mutex m_queueMutex;
     
     QTimer* m_batchTimer;
-    QTimer* m_stopCheckTimer;  //定期检查停止状态
+    QTimer* m_stopCheckTimer;
+    QTimer* m_cleanupTimer;
     
     std::atomic<bool> m_running;
-    std::atomic<bool> m_stopRequested;  //停止请求标志
+    std::atomic<bool> m_stopRequested;
+    std::atomic<bool> m_cleanupInProgress;
     std::atomic<int> m_completedCount;
     std::atomic<int> m_totalCount;
-    std::atomic<int> m_activePings;  //活跃ping计数
+    std::atomic<int> m_activePings;
     
     int m_threadCount;
     int m_timeoutMs;
+    int m_maxConcurrentTasks;
     bool m_enableLogging;
     
-    static constexpr int BATCH_SIZE = 500;  //减小批次大小以提高响应性
-    static constexpr int MAX_CONCURRENT_PINGS = 1000;  //限制并发ping数量
+    static constexpr int BATCH_SIZE = 500;
+    static constexpr int DEFAULT_MAX_CONCURRENT_PINGS = 1000;
 };
 
 #endif // PINGWORKER_H

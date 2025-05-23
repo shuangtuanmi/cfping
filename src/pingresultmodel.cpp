@@ -48,6 +48,11 @@ QVariant PingResultModel::data(const QModelIndex &index, int role) const
             return QColor(240, 255, 240);
         }
     }
+    else if (role == Qt::ToolTipRole && index.column() == 0) {
+        // 为IP列添加工具提示，特别对IPv6地址有用
+        QString protocol = result.ip.contains(':') ? "IPv6" : "IPv4";
+        return QString("%1 (%2)").arg(result.ip).arg(protocol);
+    }
     
     return QVariant();
 }
@@ -56,7 +61,7 @@ QVariant PingResultModel::headerData(int section, Qt::Orientation orientation, i
 {
     if (orientation == Qt::Horizontal && role == Qt::DisplayRole) {
         switch (section) {
-        case 0: return "IP地址";
+        case 0: return "IP地址 (IPv4/IPv6)";
         case 1: return "延迟 (毫秒)";
         case 2: return "状态";
         }
