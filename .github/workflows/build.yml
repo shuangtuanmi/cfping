@@ -48,16 +48,22 @@ jobs:
       if: matrix.os == 'windows-latest'
       run: |
         choco install ninja
-        # Install vcpkg and boost
+        # Install vcpkg and full boost library
         git clone https://github.com/Microsoft/vcpkg.git
         .\vcpkg\bootstrap-vcpkg.bat
-        .\vcpkg\vcpkg.exe install boost-system:x64-windows
+        # Install the full boost package which includes asio
+        .\vcpkg\vcpkg.exe install boost:x64-windows
         
     - name: Debug Boost installation (Windows)
       if: matrix.os == 'windows-latest'
       run: |
         echo "Checking Boost installation..."
         dir vcpkg\installed\x64-windows\include\boost
+        if (Test-Path "vcpkg\installed\x64-windows\include\boost\asio.hpp") {
+          echo "boost/asio.hpp found!"
+        } else {
+          echo "boost/asio.hpp NOT found!"
+        }
         dir vcpkg\installed\x64-windows\lib
         
     - name: Install dependencies (macOS)

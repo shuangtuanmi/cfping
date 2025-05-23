@@ -17,6 +17,16 @@ find_package(Qt5 REQUIRED COMPONENTS Core Widgets Gui Network)
 if(DEFINED ENV{VCPKG_ROOT} OR EXISTS "${CMAKE_SOURCE_DIR}/vcpkg")
     # Using vcpkg - use CONFIG mode to avoid FindBoost module
     find_package(Boost REQUIRED COMPONENTS system CONFIG)
+    # For vcpkg, also find asio (it might be header-only)
+    find_path(BOOST_ASIO_INCLUDE_DIR boost/asio.hpp 
+              PATHS ${CMAKE_PREFIX_PATH}/include 
+                    ${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/installed/x64-windows/include
+              NO_DEFAULT_PATH)
+    
+    if(NOT BOOST_ASIO_INCLUDE_DIR)
+        message(FATAL_ERROR "Boost.Asio not found! Please install boost-asio via vcpkg")
+    endif()
+    
     # For vcpkg, use target-based linking
     set(BOOST_LIBRARIES Boost::system)
     
@@ -24,6 +34,7 @@ if(DEFINED ENV{VCPKG_ROOT} OR EXISTS "${CMAKE_SOURCE_DIR}/vcpkg")
     message(STATUS "Using vcpkg Boost")
     message(STATUS "Boost_FOUND: ${Boost_FOUND}")
     message(STATUS "Boost_VERSION: ${Boost_VERSION}")
+    message(STATUS "Boost.Asio include dir: ${BOOST_ASIO_INCLUDE_DIR}")
     if(TARGET Boost::system)
         get_target_property(BOOST_INCLUDE_DIRS Boost::system INTERFACE_INCLUDE_DIRECTORIES)
         message(STATUS "Boost include dirs: ${BOOST_INCLUDE_DIRS}")
