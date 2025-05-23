@@ -1,0 +1,112 @@
+name: Qt5 Build and Release
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [published]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        qt-version: ['5.15.2']
+        
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: ${{ matrix.qt-version }}
+        modules: 'qtnetwork qtwidgets qttools'
+        
+    - name: Install dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ninja-build libboost-all-dev
+        
+    - name: Install dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        choco install ninja
+        # Install vcpkg and boost
+        git clone https://github.com/Microsoft/vcpkg.git
+        .\vcpkg\bootstrap-vcpkg.bat
+        .\vcpkg\vcpkg.exe install boost-system:x64-windows
+        
+    - name: Install dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install ninja boost
+        
+    - name: Setup MSVC (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: ilammy/msvc-dev-cmd@v1
+      
+    - name: Configure CMake (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        cmake -S . -B build -G "Ninja Multi-Config" `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DCMAKE_PREFIX_PATH="${{ env.Qt5_Dir }}" `
+          -DCMAKE_TOOLCHAIN_FILE="vcpkg/scripts/buildsystems/vcpkg.cmake"
+          
+    - name: Configure CMake (Linux/macOS)
+      if: matrix.os != 'windows-latest'
+      run: |
+        cmake -S . -B build -G "Ninja Multi-Config" \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_PREFIX_PATH="${{ env.Qt5_Dir }}"
+          
+    - name: Build
+      run: cmake --build build --config Release
+      
+    - name: Package (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        cd build
+        cpack -G DEB -C Release
+        cpack -G TGZ -C Release
+        
+    - name: Package (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        cd build
+        cpack -G NSIS -C Release
+        
+    - name: Package (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        cd build
+        cpack -G DragNDrop -C Release
+        
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: cfping-${{ matrix.os }}
+        path: build/_CPack_Packages/*/NSIS/*.exe
+      if: matrix.os == 'windows-latest'
+        
+    - name: Upload artifacts (Linux)
+      uses: actions/upload-artifact@v3
+      with:
+        name: cfping-${{ matrix.os }}
+        path: |
+          build/*.deb
+          build/*.tar.gz
+      if: matrix.os == 'ubuntu-latest'
+        
+    - name: Upload artifacts (macOS)
+      uses: actions/upload-artifact@v3
+      with:
+        name: cfping-${{ matrix.os }}
+        path: build/*.dmg
+      if: matrix.os == 'macos-latest'

@@ -67,7 +67,6 @@ desktop.ini
 boost_*/
 
 # Output files
-*.txt
 !*.gitkeep
 
 # Backup files
