@@ -28,8 +28,8 @@ public:
     explicit PingWorker(QObject *parent = nullptr); // 构造函数
     ~PingWorker(); // 析构函数
 
-    // 设置线程数、超时时间、日志开关、最大并发任务数
-    void setSettings(int threadCount, int timeoutMs, bool enableLogging, int maxConcurrentTasks);
+    // 设置线程数、超时时间、日志开关、最大并发任务数、端口号
+    void setSettings(int threadCount, int timeoutMs, bool enableLogging, int maxConcurrentTasks, int port);
 
 public slots:
     void startPing(const QStringList& cidrRanges); // 启动ping任务
@@ -79,6 +79,7 @@ private:
     int m_threadCount; // 线程数
     int m_timeoutMs; // 超时时间
     int m_maxConcurrentTasks; // 最大并发任务数
+    int m_port; // 端口号
     bool m_enableLogging; // 是否启用日志
     
     static constexpr int BATCH_SIZE = 500; // 每批处理数量

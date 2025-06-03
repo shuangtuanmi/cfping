@@ -72,6 +72,7 @@ private:
     QSpinBox* m_threadCountSpinBox;
     QSpinBox* m_timeoutSpinBox;
     QSpinBox* m_concurrentTasksSpinBox;  //最大并发任务控制
+    QSpinBox* m_portSpinBox;  // 端口号配置
     QCheckBox* m_enableLoggingCheckBox;
     
     // 右侧面板 - 结果和日志
@@ -85,6 +86,9 @@ private:
     QProgressBar* m_progressBar;
     QLabel* m_statusLabel;
     QLabel* m_testCountLabel;
+    QLabel* m_elapsedTimeLabel;      // 已耗时显示
+    QLabel* m_remainingTimeLabel;    // 剩余时间显示
+    QLabel* m_estimatedFinishLabel;  // 预计完成时间显示
     
     // 工作线程与数据
     std::unique_ptr<PingWorker> m_pingWorker;
@@ -94,6 +98,7 @@ private:
     bool m_isRunning;
     int m_totalIPs;
     int m_completedIPs;
+    QDateTime m_startTime;  // 开始时间记录
 };
 
 #endif // MAINWINDOW_H

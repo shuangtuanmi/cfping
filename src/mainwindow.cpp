@@ -84,9 +84,15 @@ void MainWindow::setupUI()
     m_concurrentTasksSpinBox->setValue(500);
     m_concurrentTasksSpinBox->setSingleStep(10);
     settingsLayout->addWidget(m_concurrentTasksSpinBox, 2, 1);
-    
+
+    settingsLayout->addWidget(new QLabel("端口号:"), 3, 0);
+    m_portSpinBox = new QSpinBox();
+    m_portSpinBox->setRange(1, 65535);
+    m_portSpinBox->setValue(80);
+    settingsLayout->addWidget(m_portSpinBox, 3, 1);
+
     m_enableLoggingCheckBox = new QCheckBox("启用详细日志");
-    settingsLayout->addWidget(m_enableLoggingCheckBox, 3, 0, 1, 2);
+    settingsLayout->addWidget(m_enableLoggingCheckBox, 4, 0, 1, 2);
     
     leftLayout->addLayout(settingsLayout);
     
@@ -106,10 +112,16 @@ void MainWindow::setupUI()
     m_progressBar = new QProgressBar();
     m_statusLabel = new QLabel("就绪");
     m_testCountLabel = new QLabel("IP地址: 0 / 0");
-    
+    m_elapsedTimeLabel = new QLabel("已耗时: 00:00:00");
+    m_remainingTimeLabel = new QLabel("剩余时间: --:--:--");
+    m_estimatedFinishLabel = new QLabel("预计完成: --:--:--");
+
     leftLayout->addWidget(m_progressBar);
     leftLayout->addWidget(m_statusLabel);
     leftLayout->addWidget(m_testCountLabel);
+    leftLayout->addWidget(m_elapsedTimeLabel);
+    leftLayout->addWidget(m_remainingTimeLabel);
+    leftLayout->addWidget(m_estimatedFinishLabel);
     
     leftLayout->addStretch();
     leftPanel->setMaximumWidth(350);
@@ -234,7 +246,8 @@ void MainWindow::startPing()
     m_isRunning = true;
     m_completedIPs = 0;
     m_totalIPs = 0;
-    
+    m_startTime = QDateTime::currentDateTime();  // 记录开始时间
+
     // 清空结果模型
     m_resultsModel->clear();
 
@@ -251,13 +264,14 @@ void MainWindow::startPing()
         int threadCount = m_threadCountSpinBox->value();
         int timeout = m_timeoutSpinBox->value();
         int maxConcurrentTasks = m_concurrentTasksSpinBox->value();
+        int port = m_portSpinBox->value();  // 获取端口号
         bool enableLogging = m_enableLoggingCheckBox->isChecked();
         QStringList ranges = cidrRanges;
-        
+
         // 连接信号
-        connect(m_workerThread, &QThread::started, [this, threadCount, timeout, enableLogging, maxConcurrentTasks, ranges]() {
+        connect(m_workerThread, &QThread::started, [this, threadCount, timeout, enableLogging, maxConcurrentTasks, port, ranges]() {
             if (m_pingWorker) {
-                m_pingWorker->setSettings(threadCount, timeout, enableLogging, maxConcurrentTasks);
+                m_pingWorker->setSettings(threadCount, timeout, enableLogging, maxConcurrentTasks, port);
                 m_pingWorker->startPing(ranges);
             }
         });
@@ -275,7 +289,7 @@ void MainWindow::startPing()
         // 启动线程
         m_workerThread->start();
         
-        addLogMessage("开始TCP连接测试 (端口80)...");
+        addLogMessage(QString("开始TCP连接测试 (端口%1)...").arg(port));
     }
     catch (const std::exception& e) {
         addLogMessage(QString("启动测试时出错: %1").arg(e.what()));
@@ -436,7 +450,49 @@ void MainWindow::updateResultsDisplay()
         int percentage = std::min(100, (m_completedIPs * 100) / m_totalIPs);
         m_progressBar->setValue(percentage);
         m_testCountLabel->setText(QString("IP地址: %1 / %2").arg(m_completedIPs).arg(m_totalIPs));
-        
+
+        // 计算时间信息
+        if (m_isRunning && m_startTime.isValid()) {
+            QDateTime currentTime = QDateTime::currentDateTime();
+            qint64 elapsedMs = m_startTime.msecsTo(currentTime);
+
+            // 格式化已耗时
+            int elapsedSeconds = elapsedMs / 1000;
+            int hours = elapsedSeconds / 3600;
+            int minutes = (elapsedSeconds % 3600) / 60;
+            int seconds = elapsedSeconds % 60;
+            m_elapsedTimeLabel->setText(QString("已耗时: %1:%2:%3")
+                .arg(hours, 2, 10, QChar('0'))
+                .arg(minutes, 2, 10, QChar('0'))
+                .arg(seconds, 2, 10, QChar('0')));
+
+            // 计算剩余时间和预计完成时间
+            if (m_completedIPs > 0 && m_completedIPs < m_totalIPs) {
+                // 计算平均每个IP的处理时间
+                double avgTimePerIP = static_cast<double>(elapsedMs) / m_completedIPs;
+                int remainingIPs = m_totalIPs - m_completedIPs;
+                qint64 estimatedRemainingMs = static_cast<qint64>(avgTimePerIP * remainingIPs);
+
+                // 格式化剩余时间
+                int remainingSeconds = estimatedRemainingMs / 1000;
+                int remHours = remainingSeconds / 3600;
+                int remMinutes = (remainingSeconds % 3600) / 60;
+                int remSecs = remainingSeconds % 60;
+                m_remainingTimeLabel->setText(QString("剩余时间: %1:%2:%3")
+                    .arg(remHours, 2, 10, QChar('0'))
+                    .arg(remMinutes, 2, 10, QChar('0'))
+                    .arg(remSecs, 2, 10, QChar('0')));
+
+                // 计算预计完成时间
+                QDateTime estimatedFinish = currentTime.addMSecs(estimatedRemainingMs);
+                m_estimatedFinishLabel->setText(QString("预计完成: %1")
+                    .arg(estimatedFinish.toString("hh:mm:ss")));
+            } else if (m_completedIPs >= m_totalIPs) {
+                m_remainingTimeLabel->setText("剩余时间: 00:00:00");
+                m_estimatedFinishLabel->setText("预计完成: 已完成");
+            }
+        }
+
         // 在进度条100%时更新状态文本
         if (percentage >= 100) {
             m_statusLabel->setText("测试完成");
@@ -468,11 +524,16 @@ void MainWindow::enableControls(bool enabled)
     m_threadCountSpinBox->setEnabled(enabled);
     m_timeoutSpinBox->setEnabled(enabled);
     m_concurrentTasksSpinBox->setEnabled(enabled);
+    m_portSpinBox->setEnabled(enabled);  // 添加端口号控件的启用/禁用
     m_enableLoggingCheckBox->setEnabled(enabled);
-    
+
     if (enabled) {
         m_statusLabel->setText("就绪");
         m_progressBar->setValue(0);
+        // 重置时间显示
+        m_elapsedTimeLabel->setText("已耗时: 00:00:00");
+        m_remainingTimeLabel->setText("剩余时间: --:--:--");
+        m_estimatedFinishLabel->setText("预计完成: --:--:--");
     } else {
         m_statusLabel->setText("正在运行...");
     }

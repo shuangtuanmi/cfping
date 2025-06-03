@@ -27,6 +27,7 @@ PingWorker::PingWorker(QObject *parent)
     , m_threadCount(4)
     , m_timeoutMs(1000)
     , m_maxConcurrentTasks(DEFAULT_MAX_CONCURRENT_PINGS)
+    , m_port(80)  // 默认端口80
     , m_enableLogging(false)
 {
     // 批量处理定时器，定期处理下一批IP
@@ -62,13 +63,14 @@ PingWorker::~PingWorker()
     }
 }
 
-// 设置线程数、超时时间、日志开关、最大并发任务数
-void PingWorker::setSettings(int threadCount, int timeoutMs, bool enableLogging, int maxConcurrentTasks)
+// 设置线程数、超时时间、日志开关、最大并发任务数、端口号
+void PingWorker::setSettings(int threadCount, int timeoutMs, bool enableLogging, int maxConcurrentTasks, int port)
 {
     m_threadCount = threadCount;
     m_timeoutMs = timeoutMs;
     m_enableLogging = enableLogging;
     m_maxConcurrentTasks = maxConcurrentTasks > 0 ? maxConcurrentTasks : DEFAULT_MAX_CONCURRENT_PINGS;
+    m_port = port > 0 && port <= 65535 ? port : 80;  // 验证端口号范围
 }
 
 // 启动ping任务，初始化环境并启动线程池
@@ -362,8 +364,8 @@ boost::asio::awaitable<void> PingWorker::pingIPWithAddress(boost::asio::ip::addr
         
         auto start_time = std::chrono::steady_clock::now();
         
-        // 创建端点，IPv6和IPv4都使用端口80
-        boost::asio::ip::tcp::endpoint endpoint(address, 80);
+        // 创建端点，IPv6和IPv4都使用配置的端口号
+        boost::asio::ip::tcp::endpoint endpoint(address, m_port);
        
         boost::asio::steady_timer timer(executor);
         timer.expires_after(std::chrono::milliseconds(std::min(m_timeoutMs, 2000)));
@@ -408,10 +410,10 @@ boost::asio::awaitable<void> PingWorker::pingIPWithAddress(boost::asio::ip::addr
                         if (success) {
                             // IPv6地址可能很长，使用适当的格式
                             QString protocol = originalIP.contains(':') ? "IPv6" : "IPv4";
-                            emit logMessage(QString("TCP connect %1 (%2):80: %3ms")
-                                           .arg(originalIP).arg(protocol).arg(latency, 0, 'f', 2));
+                            emit logMessage(QString("TCP connect %1 (%2):%3: %4ms")
+                                           .arg(originalIP).arg(protocol).arg(m_port).arg(latency, 0, 'f', 2));
                         } else {
-                            emit logMessage(QString("TCP connect %1:80 timeout").arg(originalIP));
+                            emit logMessage(QString("TCP connect %1:%2 timeout").arg(originalIP).arg(m_port));
                         }
                     }
                 }, Qt::QueuedConnection);
@@ -436,11 +438,11 @@ boost::asio::awaitable<void> PingWorker::pingIPWithAddress(boost::asio::ip::addr
                     if (m_enableLogging) {
                         QString protocol = originalIP.contains(':') ? "IPv6" : "IPv4";
                         if (isReachable) {
-                            emit logMessage(QString("TCP connect %1 (%2):80: %3ms (port closed but reachable)")
-                                           .arg(originalIP).arg(protocol).arg(latency, 0, 'f', 2));
+                            emit logMessage(QString("TCP connect %1 (%2):%3: %4ms (port closed but reachable)")
+                                           .arg(originalIP).arg(protocol).arg(m_port).arg(latency, 0, 'f', 2));
                         } else {
-                            emit logMessage(QString("TCP connect %1 (%2):80 failed")
-                                           .arg(originalIP).arg(protocol));
+                            emit logMessage(QString("TCP connect %1 (%2):%3 failed")
+                                           .arg(originalIP).arg(protocol).arg(m_port));
                         }
                     }
                 }, Qt::QueuedConnection);
@@ -451,8 +453,8 @@ boost::asio::awaitable<void> PingWorker::pingIPWithAddress(boost::asio::ip::addr
                     emit pingResult(originalIP, 0.0, false);
                     if (m_enableLogging) {
                         QString protocol = originalIP.contains(':') ? "IPv6" : "IPv4";
-                        emit logMessage(QString("TCP connect %1 (%2) failed with exception")
-                                       .arg(originalIP).arg(protocol));
+                        emit logMessage(QString("TCP connect %1 (%2):%3 failed with exception")
+                                       .arg(originalIP).arg(protocol).arg(m_port));
                     }
                 }, Qt::QueuedConnection);
             }
@@ -464,8 +466,8 @@ boost::asio::awaitable<void> PingWorker::pingIPWithAddress(boost::asio::ip::addr
                 emit pingResult(originalIP, 0.0, false);
                 if (m_enableLogging) {
                     QString protocol = originalIP.contains(':') ? "IPv6" : "IPv4";
-                    emit logMessage(QString("TCP connect %1 (%2) failed with exception")
-                                   .arg(originalIP).arg(protocol));
+                    emit logMessage(QString("TCP connect %1 (%2):%3 failed with exception")
+                                   .arg(originalIP).arg(protocol).arg(m_port));
                 }
             }, Qt::QueuedConnection);
         }
